@@ -1,4 +1,3 @@
-from datetime import datetime, timedelta
 import os
 import sys
 import subprocess
@@ -6,19 +5,25 @@ import zipfile
 import tempfile
 import urllib.request
 from PIL import Image
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout,
-    QMessageBox, QTextBrowser, QDialog
-)
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QWidget
+from PyQt5.QtWidgets import QPushButton
+from PyQt5.QtWidgets import QLabel
+from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout
+from PyQt5.QtWidgets import QMessageBox, QTextBrowser, QDialog
+from PyQt5.QtWidgets import QComboBox, QListWidget, QListWidgetItem
+from PyQt5.QtWidgets import QFileDialog
 from PyQt5.QtCore import QTimer, Qt
 from PyQt5.QtGui import QPalette, QColor, QTextCursor
+from datetime import datetime
+
 
 IMG_DIR = r"E:\python\images"
 OUTPUT_DIR = r"E:\python\NaXinh"
 ZIP_PATH = "sticker_pack.zip"
 ROWS, COLS = 3, 3
 
-CURRENT_VERSION = "1.2"
+CURRENT_VERSION = "1.11"
 
 class GuidePopup(QDialog):
     def __init__(self, parent=None):
@@ -53,6 +58,7 @@ class ImageTool(QWidget):
         self.setup_timers()
 
     def init_ui(self):
+        self.cleanup_target_folder = os.path.dirname(os.path.abspath(__file__))
         self.setWindowTitle("Tách ảnh & ZIP (PyQt5)")
         self.setGeometry(100, 100, 540, 500)
         palette = QPalette()
@@ -77,7 +83,7 @@ class ImageTool(QWidget):
         self.delete_btn.clicked.connect(self.delete_files)
 
         self.help_btn = QPushButton("❓ Hướng dẫn")
-        self.help_btn.clicked.connect(self.show_full_help)
+        self.help_btn.clicked.connect(self.fetch_readme_instructions)
 
         self.status = QLabel("")
         self.status.setAlignment(Qt.AlignCenter)
@@ -88,7 +94,7 @@ class ImageTool(QWidget):
         self.log.setStyleSheet("background-color: black; color: lime; font-family: Consolas;")
         self.log.anchorClicked.connect(self.open_image)
 
-        self.version_label = QLabel("<a href='#' style='color: gray;'>Phiên bản: 1.0 beta</a>")
+        self.version_label = QLabel("<a href='#' style='color: gray;'>Phiên bản: 1.8</a>")
         self.version_label.setOpenExternalLinks(False)
         self.version_label.setTextFormat(Qt.RichText)
         self.version_label.linkActivated.connect(self.show_update_check)
@@ -105,9 +111,46 @@ class ImageTool(QWidget):
         layout.addWidget(self.open_btn)
         layout.addWidget(self.delete_btn)
         layout.addWidget(self.help_btn)
+        self.day_select = QComboBox()
+        self.day_select.addItems([str(i) for i in range(1, 8)])
+        self.day_select.setStyleSheet("color: lime; background-color: #222;")
+        
+
+        
         self.cleanup_btn = QPushButton("🧹 Dọn rác")
-        self.cleanup_btn.clicked.connect(self.clean_old_files)
         layout.addWidget(self.cleanup_btn)
+
+        self.auto_btn = QPushButton("Xóa tự động")
+        self.auto_btn.clicked.connect(self.clean_old_files_auto)
+        self.manual_btn = QPushButton("Xóa thủ công")
+        self.manual_btn.clicked.connect(self.show_manual_cleanup)
+        self.day_select = QComboBox()
+        self.day_select.addItems([str(i) for i in range(1, 8)])
+        self.day_select.setStyleSheet("color: lime; background-color: #222;")
+
+        cleanup_layout = QVBoxLayout()
+
+        self.select_folder_btn = QPushButton("📂 Chọn thư mục dọn rác")
+        self.select_folder_btn.clicked.connect(self.choose_cleanup_folder)
+        cleanup_layout.addWidget(self.select_folder_btn)
+
+        self.cleanup_target_folder = self.cleanup_target_folder
+
+        cleanup_layout.addWidget(QLabel("🕒 Số ngày giữ lại:"))
+        cleanup_layout.addWidget(self.day_select)
+        cleanup_layout.addWidget(self.auto_btn)
+        cleanup_layout.addWidget(self.manual_btn)
+
+        cleanup_box = QWidget()
+        cleanup_box.setLayout(cleanup_layout)
+        cleanup_box.setVisible(False)
+        layout.addWidget(cleanup_box)
+
+        def toggle_cleanup():
+            cleanup_box.setVisible(not cleanup_box.isVisible())
+
+        self.cleanup_btn.clicked.connect(toggle_cleanup)
+
 
         layout.addWidget(self.status)
         layout.addWidget(self.log)
@@ -120,7 +163,6 @@ class ImageTool(QWidget):
     def setup_timers(self):
         pass
 
-    
     def show_update_check(self):
         try:
             with urllib.request.urlopen("https://raw.githubusercontent.com/clonenvb/app/main/version.txt") as response:
@@ -132,28 +174,22 @@ class ImageTool(QWidget):
         if latest_version > CURRENT_VERSION:
             reply = QMessageBox.question(
                 self, "Có bản cập nhật mới!",
-                f"Phiên bản mới {latest_version} đã có.
-Bạn có muốn tải về không?",
+                f"Phiên bản mới {latest_version} đã có.\nBạn có muốn tải về không?",
                 QMessageBox.Yes | QMessageBox.No
             )
             if reply == QMessageBox.Yes:
                 try:
-                    # Tự động tạo URL file .py theo phiên bản
-                    base_url = "https://raw.githubusercontent.com/clonenvb/app/main/"
-                    filename = f"split_and_zip_autoupdate_v{latest_version}.py"
-                    download_url = base_url + filename
-
+                    download_url = "https://raw.githubusercontent.com/clonenvb/app/main/split_and_zip_with_update.py"
                     temp_dir = tempfile.gettempdir()
-                    new_file = os.path.join(temp_dir, filename)
+                    new_file = os.path.join(temp_dir, "split_and_zip_updated.py")
                     urllib.request.urlretrieve(download_url, new_file)
-                    QMessageBox.information(self, "Đang khởi động lại...", f"Ứng dụng sẽ khởi động lại với {filename}")
+                    QMessageBox.information(self, "Đang khởi động lại...", "Ứng dụng sẽ khởi động lại bằng phiên bản mới.")
                     subprocess.Popen(["python", new_file], shell=True)
                     sys.exit()
                 except Exception as e:
                     QMessageBox.warning(self, "Lỗi", f"Tải hoặc chạy phiên bản mới thất bại: {e}")
         else:
             QMessageBox.information(self, "Thông báo", "Bạn đang dùng phiên bản mới nhất.")
-
 
     def show_full_help(self):
         popup = GuidePopup(self)
@@ -220,39 +256,168 @@ Bạn có muốn tải về không?",
         self.status.setText("Đã xóa.")
 
     
-
-    def clean_old_files(self):
-        days = QMessageBox.question(
-            self, "Chọn khoảng thời gian",
-            "Bạn muốn giữ lại các file trong bao nhiêu ngày gần nhất?\n(Chọn: 1, 3, 5 hoặc 7 ngày)",
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-            QMessageBox.Yes
-        )
-
-        keep_days = 1
-        if days == QMessageBox.No:
-            keep_days = 3
-        elif days == QMessageBox.Cancel:
-            keep_days = 7
-
+    def clean_old_files_auto(self):
+        days = int(self.day_select.currentText())
         now = datetime.now()
-        deleted_files = 0
-        folder = os.path.dirname(os.path.abspath(__file__))
-        for filename in os.listdir(folder):
-            file_path = os.path.join(folder, filename)
-            if os.path.isfile(file_path):
-                modified_time = datetime.fromtimestamp(os.path.getmtime(file_path))
-                if (now - modified_time).days >= keep_days:
+        deleted = []
+        folder = self.cleanup_target_folder
+
+        for f in os.listdir(folder):
+            path = os.path.join(folder, f)
+            if os.path.isfile(path):
+                mod = datetime.fromtimestamp(os.path.getmtime(path))
+                if (now - mod).days >= days:
                     try:
-                        os.remove(file_path)
-                        deleted_files += 1
-                    except Exception:
+                        os.remove(path)
+                        deleted.append(f)
+                    except:
                         pass
 
-        self.log_message(f"🧹 Đã dọn {deleted_files} tệp cũ hơn {keep_days} ngày.")
-        self.status.setText("Đã dọn rác.")
+        self.log_message(f"🧹 Đã xoá {len(deleted)} file:")
+        for f in deleted:
+            self.log_message(f" - {f}")
 
-def reset_ui(self):
+
+    def show_manual_cleanup(self):
+        days = int(self.day_select.currentText())
+        now = datetime.now()
+        folder = self.cleanup_target_folder
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("🛠 Chọn file để xoá")
+        dialog.setFixedSize(400, 400)
+        layout = QVBoxLayout()
+
+        list_widget = QListWidget()
+        for f in os.listdir(folder):
+            path = os.path.join(folder, f)
+            if os.path.isfile(path):
+                mod = datetime.fromtimestamp(os.path.getmtime(path))
+                if (now - mod).days >= days:
+                    item = QListWidgetItem(f)
+                    item.setCheckState(Qt.Unchecked)
+                    list_widget.addItem(item)
+
+        layout.addWidget(list_widget)
+
+        def delete_selected():
+            count = 0
+            for i in range(list_widget.count()):
+                item = list_widget.item(i)
+                if item.checkState() == Qt.Checked:
+                    try:
+                        os.remove(os.path.join(folder, item.text()))
+                        count += 1
+                    except:
+                        pass
+            QMessageBox.information(self, "Hoàn tất", f"Đã xoá {count} file.")
+            dialog.close()
+
+        del_btn = QPushButton("Xoá file đã chọn")
+        del_btn.clicked.connect(delete_selected)
+        layout.addWidget(del_btn)
+
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+
+    
+    def check_version_update(self):
+        try:
+            with urllib.request.urlopen("https://raw.githubusercontent.com/clonenvb/app/main/version.txt") as response:
+                latest_version = response.read().decode().strip()
+            if latest_version > CURRENT_VERSION:
+                reply = QMessageBox.question(
+                    self, "Cập nhật mới",
+                    f"Đã có phiên bản {latest_version}.\nBạn có muốn cập nhật ngay không?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    filename = f"split_and_zip_autoupdate_v{latest_version}.py"
+                    url = f"https://raw.githubusercontent.com/clonenvb/app/main/{filename}"
+                    path = os.path.join(tempfile.gettempdir(), filename)
+                    urllib.request.urlretrieve(url, path)
+                    QMessageBox.information(self, "Khởi động lại", f"Ứng dụng sẽ khởi động với phiên bản {latest_version}.")
+                    subprocess.Popen(["python", path], shell=True)
+                    sys.exit()
+            else:
+                QMessageBox.information(self, "Phiên bản", "Bạn đang dùng phiên bản mới nhất.")
+        except Exception as e:
+            QMessageBox.warning(self, "Lỗi", f"Không thể kiểm tra cập nhật: {e}")
+
+
+    def fetch_readme_instructions(self):
+        try:
+            url = "https://raw.githubusercontent.com/clonenvb/app/main/README.txt"
+            with urllib.request.urlopen(url) as response:
+                text = response.read().decode("utf-8")
+                QMessageBox.information(self, "📘 Hướng dẫn (GitHub)", text)
+        except Exception as e:
+            QMessageBox.warning(self, "Lỗi", f"Không thể tải README: {e}")
+
+
+    
+
+    def show_cleanup_dialog(self):
+        days = int(self.day_select.currentText())
+        now = datetime.now()
+        folder = self.cleanup_target_folder
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("🧹 Dọn rác")
+        dialog.setFixedSize(400, 450)
+        layout = QVBoxLayout()
+
+        list_widget = QListWidget()
+        deleted = []
+
+        for f in os.listdir(folder):
+            path = os.path.join(folder, f)
+            if os.path.isfile(path):
+                mod = datetime.fromtimestamp(os.path.getmtime(path))
+                if (now - mod).days >= days:
+                    item = QListWidgetItem(f)
+                    item.setCheckState(Qt.Checked)
+                    list_widget.addItem(item)
+
+        layout.addWidget(QLabel(f"Dọn các file cũ hơn {days} ngày:"))
+        layout.addWidget(list_widget)
+
+        def delete_selected():
+            count = 0
+            for i in range(list_widget.count()):
+                item = list_widget.item(i)
+                if item.checkState() == Qt.Checked:
+                    try:
+                        os.remove(os.path.join(folder, item.text()))
+                        deleted.append(item.text())
+                        count += 1
+                    except:
+                        pass
+            QMessageBox.information(self, "Hoàn tất", f"Đã xoá {count} file.")
+            self.log_message(f"🧹 Đã xoá {count} file:")
+            for f in deleted:
+                self.log_message(f" - {f}")
+            dialog.close()
+
+        del_btn = QPushButton("Xoá các file đã chọn")
+        del_btn.clicked.connect(delete_selected)
+        layout.addWidget(del_btn)
+
+        dialog.setLayout(layout)
+        dialog.exec_()
+
+
+    
+
+    def choose_cleanup_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục dọn rác", os.path.expanduser("~"))
+        if folder:
+            self.cleanup_target_folder = folder
+            self.log_message(f"📂 Đã chọn thư mục: {folder}")
+
+
+    def reset_ui(self):
         self.status.setText("")
         self.countdown = 3
         self.run_btn.setEnabled(True)
