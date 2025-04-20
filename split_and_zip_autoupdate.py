@@ -1,33 +1,33 @@
 import os
-import zipfile
+import sys
 import subprocess
+import zipfile
+import tempfile
+import urllib.request
 from PIL import Image
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QPushButton, QLabel, QVBoxLayout, QHBoxLayout,
-    QMessageBox, QTextBrowser, QDialog, QToolTip
+    QMessageBox, QTextBrowser, QDialog
 )
-from PyQt5.QtCore import QTimer, Qt, QEvent
-from PyQt5.QtGui import QPalette, QColor, QTextCursor, QCursor
-import sys
+from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtGui import QPalette, QColor, QTextCursor
 
 IMG_DIR = r"E:\python\images"
 OUTPUT_DIR = r"E:\python\NaXinh"
 ZIP_PATH = "sticker_pack.zip"
 ROWS, COLS = 3, 3
 
+CURRENT_VERSION = "1.0"
+
 class GuidePopup(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Hướng dẫn sử dụng")
-        self.setModal(True)
         self.setFixedSize(400, 300)
-        self.setStyleSheet("background-color: #111; color: #0f0; font-family: Arial; font-size: 14px;")
-
+        self.setStyleSheet("background-color: #111; color: #0f0; font-size: 14px;")
         layout = QVBoxLayout()
         title = QLabel("📘 Cách sử dụng công cụ")
-        title.setStyleSheet("font-weight: bold; font-size: 16px;")
         layout.addWidget(title)
-
         instructions = [
             "▶️ Chạy công cụ: Tách ảnh và tạo ZIP.",
             "♻️ Chạy lại: Xóa kết quả cũ và thực hiện lại.",
@@ -36,17 +36,11 @@ class GuidePopup(QDialog):
             "🔍 Click tên ảnh: Mở ảnh vừa tạo.",
             "ℹ️ Phiên bản: Kiểm tra cập nhật."
         ]
-
         for ins in instructions:
-            label = QLabel(ins)
-            label.setWordWrap(True)
-            layout.addWidget(label)
-
+            layout.addWidget(QLabel(ins))
         close_btn = QPushButton("✖ Đóng")
-        close_btn.setStyleSheet("background-color: #333; color: lime;")
         close_btn.clicked.connect(self.close)
         layout.addWidget(close_btn, alignment=Qt.AlignRight)
-
         self.setLayout(layout)
 
 class ImageTool(QWidget):
@@ -54,25 +48,17 @@ class ImageTool(QWidget):
         super().__init__()
         self.countdown = 3
         self.image_paths = []
-        self.original_img = None
-        self.cell_width = 0
-        self.cell_height = 0
-        self.current_row = 0
-        self.hovered_widget = None
-        self.du_visible = True
-
         self.init_ui()
         self.setup_timers()
 
     def init_ui(self):
-        self.setWindowTitle("Công cụ tách ảnh và nén ZIP (PyQt5)")
-        self.setGeometry(100, 100, 540, 550)
-
+        self.setWindowTitle("Tách ảnh & ZIP (PyQt5)")
+        self.setGeometry(100, 100, 540, 500)
         palette = QPalette()
         palette.setColor(QPalette.Window, QColor("black"))
         self.setPalette(palette)
 
-        self.label = QLabel("<b style='color: lime; font-size: 16px;'>Công cụ tách ảnh 3x3 và tạo file ZIP</b>")
+        self.label = QLabel("<b style='color: lime;'>Tách ảnh 3x3 và tạo file ZIP</b>")
         self.label.setAlignment(Qt.AlignCenter)
 
         self.run_btn = QPushButton("Chạy công cụ")
@@ -86,10 +72,10 @@ class ImageTool(QWidget):
         self.open_btn.setEnabled(False)
         self.open_btn.clicked.connect(self.start_countdown)
 
-        self.delete_btn = QPushButton("🗑️ Xóa file đã tạo")
+        self.delete_btn = QPushButton("🗑️ Xóa file")
         self.delete_btn.clicked.connect(self.delete_files)
 
-        self.help_btn = QPushButton("❓ Hướng dẫn sử dụng")
+        self.help_btn = QPushButton("❓ Hướng dẫn")
         self.help_btn.clicked.connect(self.show_full_help)
 
         self.status = QLabel("")
@@ -101,18 +87,15 @@ class ImageTool(QWidget):
         self.log.setStyleSheet("background-color: black; color: lime; font-family: Consolas;")
         self.log.anchorClicked.connect(self.open_image)
 
-        self.author_label = QLabel("App được tạo by <span style='color: lime;'>Du</span>")
-        self.author_label.setStyleSheet("color: gray; font-size: 10px;")
-        self.author_label.setTextFormat(Qt.RichText)
-
         self.version_label = QLabel("<a href='#' style='color: gray;'>Phiên bản: 1.0 beta</a>")
         self.version_label.setOpenExternalLinks(False)
         self.version_label.setTextFormat(Qt.RichText)
         self.version_label.linkActivated.connect(self.show_update_check)
 
-        self.footer_layout = QHBoxLayout()
-        self.footer_layout.addWidget(self.author_label, alignment=Qt.AlignLeft)
-        self.footer_layout.addWidget(self.version_label, alignment=Qt.AlignRight)
+        footer = QHBoxLayout()
+        footer.addWidget(QLabel("App by Du", self))
+        footer.addStretch()
+        footer.addWidget(self.version_label)
 
         layout = QVBoxLayout()
         layout.addWidget(self.label)
@@ -123,31 +106,17 @@ class ImageTool(QWidget):
         layout.addWidget(self.help_btn)
         layout.addWidget(self.status)
         layout.addWidget(self.log)
-        layout.addLayout(self.footer_layout)
+        layout.addLayout(footer)
         self.setLayout(layout)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_countdown)
 
     def setup_timers(self):
-        self.du_timer = QTimer()
-        self.du_timer.timeout.connect(self.toggle_du_visibility)
-        self.du_timer.start(800)
-
-    def toggle_du_visibility(self):
-        color = "lime" if self.du_visible else "gray"
-        self.author_label.setText(f"App được tạo by <span style='color: {color};'>Du</span>")
-        self.du_visible = not self.du_visible
-
-    CURRENT_VERSION = "1.0"
+        pass
 
     def show_update_check(self):
-
-        reply = QMessageBox.question(self, "Cập nhật", "Bạn có muốn kiểm tra cập nhật không?",
-                                     QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
-                    try:
-            import urllib.request
+        try:
             with urllib.request.urlopen("https://raw.githubusercontent.com/clonenvb/app/main/version.txt") as response:
                 latest_version = response.read().decode().strip()
         except Exception as e:
@@ -161,20 +130,16 @@ class ImageTool(QWidget):
                 QMessageBox.Yes | QMessageBox.No
             )
             if reply == QMessageBox.Yes:
-                
-import shutil
-import tempfile
-download_url = "https://raw.githubusercontent.com/clonenvb/app/main/split_and_zip_with_update.py"
-try:
-    temp_dir = tempfile.gettempdir()
-    new_file = os.path.join(temp_dir, "split_and_zip_updated.py")
-    urllib.request.urlretrieve(download_url, new_file)
-    QMessageBox.information(self, "Đang khởi động lại...", "Ứng dụng sẽ khởi động lại bằng phiên bản mới.")
-    subprocess.Popen(["python", new_file], shell=True)
-    sys.exit()
-except Exception as e:
-    QMessageBox.warning(self, "Lỗi", f"Tải hoặc chạy phiên bản mới thất bại: {e}")
-
+                try:
+                    download_url = "https://raw.githubusercontent.com/clonenvb/app/main/split_and_zip_with_update.py"
+                    temp_dir = tempfile.gettempdir()
+                    new_file = os.path.join(temp_dir, "split_and_zip_updated.py")
+                    urllib.request.urlretrieve(download_url, new_file)
+                    QMessageBox.information(self, "Đang khởi động lại...", "Ứng dụng sẽ khởi động lại bằng phiên bản mới.")
+                    subprocess.Popen(["python", new_file], shell=True)
+                    sys.exit()
+                except Exception as e:
+                    QMessageBox.warning(self, "Lỗi", f"Tải hoặc chạy phiên bản mới thất bại: {e}")
         else:
             QMessageBox.information(self, "Thông báo", "Bạn đang dùng phiên bản mới nhất.")
 
@@ -184,11 +149,6 @@ except Exception as e:
 
     def log_message(self, message):
         self.log.append(message)
-        self.log.moveCursor(QTextCursor.End)
-
-    def log_file_link(self, path):
-        name = os.path.basename(path)
-        self.log.append(f"<a href='{path}' style='color:cyan;' title='Xem trước'>{name}</a>")
         self.log.moveCursor(QTextCursor.End)
 
     def open_image(self, url):
@@ -209,62 +169,43 @@ except Exception as e:
             return
 
         img_path = os.path.join(IMG_DIR, img_files[0])
-        self.original_img = Image.open(img_path)
-        img_width, img_height = self.original_img.size
-        self.cell_width = img_width // COLS
-        self.cell_height = img_height // ROWS
+        original_img = Image.open(img_path)
+        width, height = original_img.size
+        cell_width = width // COLS
+        cell_height = height // ROWS
 
         os.makedirs(OUTPUT_DIR, exist_ok=True)
         self.image_paths = []
-        self.current_row = 0
+        for row in range(ROWS):
+            for col in range(COLS):
+                left = col * cell_width
+                top = row * cell_height
+                right = left + cell_width
+                bottom = top + cell_height
+                cropped_img = original_img.crop((left, top, right, bottom))
+                out_path = os.path.join(OUTPUT_DIR, f"sticker_{row}_{col}.png")
+                cropped_img.save(out_path)
+                self.image_paths.append(out_path)
+                self.log_message(f"✅ Đã lưu: {out_path}")
 
-        self.log_message("✨ Đang cắt từng dòng ảnh...")
-        QTimer.singleShot(300, self.process_next_row)
-
-    def process_next_row(self):
-        if self.current_row >= ROWS:
-            self.finalize_zip()
-            return
-
-        for col in range(COLS):
-            left = col * self.cell_width
-            upper = self.current_row * self.cell_height
-            right = left + self.cell_width
-            lower = upper + self.cell_height
-            cropped_img = self.original_img.crop((left, upper, right, lower))
-            output_path = os.path.join(OUTPUT_DIR, f"sticker_{self.current_row}_{col}.png")
-            cropped_img.save(output_path)
-            self.image_paths.append(output_path)
-            self.log_message("✅ Đã lưu: ")
-            self.log_file_link(output_path)
-
-        self.current_row += 1
-        QTimer.singleShot(400, self.process_next_row)
-
-    def finalize_zip(self):
-        self.log_message("🗜️ Đang nén ảnh thành ZIP...")
         with zipfile.ZipFile(ZIP_PATH, 'w') as zipf:
-            for image_path in self.image_paths:
-                zipf.write(image_path, os.path.basename(image_path))
-                self.log_message(f"➕ {os.path.basename(image_path)}")
+            for path in self.image_paths:
+                zipf.write(path, os.path.basename(path))
+                self.log_message(f"🗜️ Đã thêm: {os.path.basename(path)}")
 
-        self.status.setText("✅ Hoàn tất! File ZIP đã được tạo.")
+        self.status.setText("✅ Hoàn tất!")
         self.again_btn.setEnabled(True)
         self.open_btn.setEnabled(True)
         self.run_btn.setEnabled(False)
-        self.log_message("🎉 Tất cả đã xong!")
 
     def delete_files(self):
-        deleted = 0
-        for file in self.image_paths:
-            if os.path.exists(file):
-                os.remove(file)
-                deleted += 1
+        for f in self.image_paths:
+            if os.path.exists(f):
+                os.remove(f)
         if os.path.exists(ZIP_PATH):
             os.remove(ZIP_PATH)
-            deleted += 1
-        self.log_message(f"🗑️ Đã xóa {deleted} tệp đã tạo.")
-        self.status.setText("Đã xóa tệp.")
+        self.log_message("🗑️ Đã xóa các tệp đã tạo.")
+        self.status.setText("Đã xóa.")
 
     def reset_ui(self):
         self.status.setText("")
